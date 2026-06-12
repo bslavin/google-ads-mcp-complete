@@ -118,8 +118,10 @@ class AdGroupTools:
                     ad_group.status,
                     ad_group.type,
                     ad_group.cpc_bid_micros,
+                    ad_group.tracking_url_template,
                     campaign.id,
-                    campaign.name
+                    campaign.name,
+                    campaign.tracking_url_template
                 FROM ad_group
             """
             
@@ -138,8 +140,10 @@ class AdGroupTools:
                     "status": str(row.ad_group.status.name),
                     "type": str(row.ad_group.type_.name),
                     "cpc_bid": micros_to_currency(row.ad_group.cpc_bid_micros),
+                    "tracking_url_template": str(row.ad_group.tracking_url_template) if row.ad_group.tracking_url_template else "",
                     "campaign_id": str(row.campaign.id),
-                    "campaign_name": str(row.campaign.name)
+                    "campaign_name": str(row.campaign.name),
+                    "campaign_tracking_url_template": str(row.campaign.tracking_url_template) if row.campaign.tracking_url_template else ""
                 })
             
             return {
@@ -170,7 +174,8 @@ class AdGroupTools:
         ad_group_id: str,
         name: Optional[str] = None,
         cpc_bid_micros: Optional[int] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        tracking_url_template: Optional[str] = None
     ) -> Dict[str, Any]:
         """Update an existing ad group."""
         try:
@@ -205,6 +210,10 @@ class AdGroupTools:
                 elif status.upper() == "PAUSED":
                     ad_group.status = client.enums.AdGroupStatusEnum.PAUSED
                 paths.append("status")
+            
+            if tracking_url_template is not None:
+                ad_group.tracking_url_template = tracking_url_template
+                paths.append("tracking_url_template")
                 
             update_mask.paths.extend(paths)
             ad_group_operation.update_mask = update_mask

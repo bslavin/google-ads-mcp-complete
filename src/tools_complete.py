@@ -140,7 +140,7 @@ class GoogleAdsTools:
                 },
             },
             "update_campaign": {
-                "description": "Update campaign settings including assigning portfolio bidding strategies",
+                "description": "Update campaign settings including assigning portfolio bidding strategies and tracking URL templates",
                 "handler": self.campaign_tools.update_campaign,
                 "parameters": {
                     "customer_id": {"type": "string", "required": True},
@@ -150,6 +150,7 @@ class GoogleAdsTools:
                     "start_date": {"type": "string"},
                     "end_date": {"type": "string"},
                     "bidding_strategy": {"type": "string"},
+                    "tracking_url_template": {"type": "string", "description": "Tracking URL template (e.g. '{lpurl}?utm_source=google&utm_medium=cpc')"},
                 },
             },
             "pause_campaign": {
@@ -237,7 +238,7 @@ class GoogleAdsTools:
                 },
             },
             "update_ad_group": {
-                "description": "Update ad group settings",
+                "description": "Update ad group settings including tracking URL template",
                 "handler": self.ad_group_tools.update_ad_group,
                 "parameters": {
                     "customer_id": {"type": "string", "required": True},
@@ -245,6 +246,7 @@ class GoogleAdsTools:
                     "name": {"type": "string"},
                     "status": {"type": "string"},
                     "cpc_bid_micros": {"type": "number"},
+                    "tracking_url_template": {"type": "string", "description": "Tracking URL template for the ad group"},
                 },
             },
             "list_ad_groups": {
@@ -262,7 +264,7 @@ class GoogleAdsTools:
         """Register ad management tools."""
         return {
             "create_responsive_search_ad": {
-                "description": "Create a responsive search ad",
+                "description": "Create a responsive search ad with optional tracking URL template",
                 "handler": self.ad_tools.create_responsive_search_ad,
                 "parameters": {
                     "customer_id": {"type": "string", "required": True},
@@ -272,6 +274,7 @@ class GoogleAdsTools:
                     "final_urls": {"type": "array", "required": True},
                     "path1": {"type": "string"},
                     "path2": {"type": "string"},
+                    "tracking_url_template": {"type": "string", "description": "Tracking URL template for the ad"},
                 },
             },
             "create_expanded_text_ad": {
@@ -299,7 +302,7 @@ class GoogleAdsTools:
                 },
             },
             "update_ad": {
-                "description": "Update an existing ad",
+                "description": "Update an existing ad including tracking URL template",
                 "handler": self.ad_tools.update_ad,
                 "parameters": {
                     "customer_id": {"type": "string", "required": True},
@@ -309,6 +312,7 @@ class GoogleAdsTools:
                     "descriptions": {"type": "array"},
                     "final_urls": {"type": "array"},
                     "status": {"type": "string"},
+                    "tracking_url_template": {"type": "string", "description": "Tracking URL template for the ad"},
                 },
             },
             "pause_ad": {
@@ -388,6 +392,18 @@ class GoogleAdsTools:
                     "ad_group_id": {"type": "string", "required": True},
                     "current_date_range": {"type": "string", "default": "LAST_7_DAYS"},
                     "comparison_date_range": {"type": "string", "default": "LAST_30_DAYS"},
+                },
+            },
+            "set_tracking_template": {
+                "description": "Set tracking URL template at campaign, ad group, or ad level. Use this to ensure tracking templates persist across ad changes. Supports ValueTrack parameters like {lpurl}, {campaignid}, {adgroupid}, {creative}, {keyword}, etc.",
+                "handler": self.ad_tools.set_tracking_template,
+                "parameters": {
+                    "customer_id": {"type": "string", "required": True},
+                    "tracking_url_template": {"type": "string", "required": True, "description": "Tracking URL template string, e.g. '{lpurl}?utm_source=google&utm_medium=cpc&utm_campaign={campaignid}'"},
+                    "level": {"type": "string", "required": True, "description": "Level to set template: 'campaign', 'ad_group', or 'ad'"},
+                    "campaign_id": {"type": "string", "description": "Required for campaign level"},
+                    "ad_group_id": {"type": "string", "description": "Required for ad_group and ad level"},
+                    "ad_id": {"type": "string", "description": "Required for ad level"},
                 },
             },
         }

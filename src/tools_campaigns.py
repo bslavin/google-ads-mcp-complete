@@ -226,6 +226,7 @@ class CampaignTools:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         bidding_strategy: Optional[str] = None,
+        tracking_url_template: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Update campaign settings.
         
@@ -237,6 +238,7 @@ class CampaignTools:
             start_date: New start date (YYYY-MM-DD format)
             end_date: New end date (YYYY-MM-DD format)
             bidding_strategy: Portfolio bidding strategy resource name (e.g., customers/123/biddingStrategies/456)
+            tracking_url_template: Tracking URL template string
         """
         try:
             client = self.auth_manager.get_client(customer_id)
@@ -273,6 +275,10 @@ class CampaignTools:
             if bidding_strategy is not None:
                 campaign.bidding_strategy = bidding_strategy
                 update_mask.append("bidding_strategy")
+            
+            if tracking_url_template is not None:
+                campaign.tracking_url_template = tracking_url_template
+                update_mask.append("tracking_url_template")
                 
             # Set the update mask
             campaign_operation.update_mask.CopyFrom(
@@ -322,7 +328,8 @@ class CampaignTools:
                     campaign.id,
                     campaign.name,
                     campaign.status,
-                    campaign.advertising_channel_type
+                    campaign.advertising_channel_type,
+                    campaign.tracking_url_template
                 FROM campaign
             """
             
@@ -350,6 +357,7 @@ class CampaignTools:
                     "name": str(row.campaign.name),
                     "status": str(row.campaign.status.name),
                     "type": str(row.campaign.advertising_channel_type.name),
+                    "tracking_url_template": str(row.campaign.tracking_url_template) if row.campaign.tracking_url_template else "",
                 })
                 
             return {

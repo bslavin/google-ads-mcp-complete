@@ -24,7 +24,8 @@ class AdTools:
         descriptions: List[str],
         final_urls: List[str],
         path1: Optional[str] = None,
-        path2: Optional[str] = None
+        path2: Optional[str] = None,
+        tracking_url_template: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a responsive search ad."""
         try:
@@ -70,6 +71,10 @@ class AdTools:
             if path2:
                 responsive_search_ad_info.path2 = path2
             
+            # Set tracking URL template if provided
+            if tracking_url_template:
+                ad_group_ad.ad.tracking_url_template = tracking_url_template
+            
             # Create the ad
             response = ad_group_ad_service.mutate_ad_group_ads(
                 customer_id=customer_id,
@@ -98,6 +103,7 @@ class AdTools:
                 "headlines_count": len(headlines),
                 "descriptions_count": len(descriptions),
                 "final_urls": final_urls,
+                "tracking_url_template": tracking_url_template or "",
                 "status": "ENABLED"
             }
             
@@ -225,6 +231,7 @@ class AdTools:
                     ad_group_ad.ad.type,
                     ad_group_ad.status,
                     ad_group_ad.ad.final_urls,
+                    ad_group_ad.ad.tracking_url_template,
                     ad_group_ad.ad.responsive_search_ad.headlines,
                     ad_group_ad.ad.responsive_search_ad.descriptions,
                     ad_group_ad.ad.expanded_text_ad.headline_part1,
@@ -232,8 +239,10 @@ class AdTools:
                     ad_group_ad.ad.expanded_text_ad.description,
                     ad_group.id,
                     ad_group.name,
+                    ad_group.tracking_url_template,
                     campaign.id,
-                    campaign.name
+                    campaign.name,
+                    campaign.tracking_url_template
                 FROM ad_group_ad
             """
             
@@ -261,10 +270,13 @@ class AdTools:
                     "type": str(row.ad_group_ad.ad.type_.name),
                     "status": str(row.ad_group_ad.status.name),
                     "final_urls": list(row.ad_group_ad.ad.final_urls),
+                    "tracking_url_template": str(row.ad_group_ad.ad.tracking_url_template) if row.ad_group_ad.ad.tracking_url_template else "",
                     "ad_group_id": str(row.ad_group.id),
                     "ad_group_name": str(row.ad_group.name),
+                    "ad_group_tracking_url_template": str(row.ad_group.tracking_url_template) if row.ad_group.tracking_url_template else "",
                     "campaign_id": str(row.campaign.id),
-                    "campaign_name": str(row.campaign.name)
+                    "campaign_name": str(row.campaign.name),
+                    "campaign_tracking_url_template": str(row.campaign.tracking_url_template) if row.campaign.tracking_url_template else ""
                 }
                 
                 # Add type-specific details
@@ -318,7 +330,8 @@ class AdTools:
         final_urls: Optional[List[str]] = None,
         path1: Optional[str] = None,
         path2: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        tracking_url_template: Optional[str] = None
     ) -> Dict[str, Any]:
         """Update an existing ad."""
         try:
@@ -377,6 +390,11 @@ class AdTools:
                 if path2 is not None:
                     ad_group_ad.ad.responsive_search_ad.path2 = path2
                     update_mask.paths.append("ad.responsive_search_ad.path2")
+            
+            # Update tracking URL template if provided
+            if tracking_url_template is not None:
+                ad_group_ad.ad.tracking_url_template = tracking_url_template
+                update_mask.paths.append("ad.tracking_url_template")
             
             # Set the update mask
             ad_group_ad_operation.update_mask = update_mask
@@ -1315,3 +1333,166 @@ class AdTools:
         except GoogleAdsException as e:
             logger.error(f"Failed to analyze ad strength trends: {e}")
             raise
+    
+    async def set_tracking_template(
+        self,
+        customer_id: str,
+        tracking_url_template: str,
+        level: str = "campaign",
+        campaign_id: Optional[str] = None,
+        ad_group_id: Optional[str] = None,
+        ad_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Set tracking URL template at campaign, ad group, or ad level.
+        
+        Args:
+            customer_id: The customer ID
+            tracking_url_template: The tracking URL template string (e.g. 
+                '{lpurl}?utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={adgroupid}')
+            level: The level to set the template at: 'campaign', 'ad_group', or 'ad'
+            campaign_id: Required for campaign and ad_group level
+            ad_group_id: Required for ad_group and ad level
+            ad_id: Required for ad level
+        """
+        try:
+            client = self.auth_manager.get_client(customer_id)
+            from google.protobuf.field_mask_pb2 import FieldMask
+            
+            level = level.lower()
+            
+            if level == "campaign":
+                if not campaign_id:
+                    return {
+                        "success": False,
+                        "error": "campaign_id is required for campaign-level tracking template"
+                    }
+                
+                campaign_service = client.get_service("CampaignService")
+                campaign_operation = client.get_type("CampaignOperation")
+                campaign = campaign_operation.update
+                campaign.resource_name = f"customers/{customer_id}/campaigns/{campaign_id}"
+                campaign.tracking_url_template = tracking_url_template
+                
+                campaign_operation.update_mask.CopyFrom(
+                    FieldMask(paths=["tracking_url_template"])
+                )
+                
+                response = campaign_service.mutate_campaigns(
+                    customer_id=customer_id,
+                    operations=[campaign_operation],
+                )
+                
+                logger.info(
+                    f"Set tracking template on campaign",
+                    customer_id=customer_id,
+                    campaign_id=campaign_id,
+                    tracking_url_template=tracking_url_template
+                )
+                
+                return {
+                    "success": True,
+                    "level": "campaign",
+                    "campaign_id": campaign_id,
+                    "tracking_url_template": tracking_url_template,
+                    "resource_name": response.results[0].resource_name,
+                    "message": f"Tracking template set on campaign {campaign_id}"
+                }
+                
+            elif level == "ad_group":
+                if not ad_group_id:
+                    return {
+                        "success": False,
+                        "error": "ad_group_id is required for ad_group-level tracking template"
+                    }
+                
+                ad_group_service = client.get_service("AdGroupService")
+                ad_group_operation = client.get_type("AdGroupOperation")
+                ad_group = ad_group_operation.update
+                ad_group.resource_name = ad_group_service.ad_group_path(
+                    customer_id, ad_group_id
+                )
+                ad_group.tracking_url_template = tracking_url_template
+                
+                ad_group_operation.update_mask.CopyFrom(
+                    FieldMask(paths=["tracking_url_template"])
+                )
+                
+                response = ad_group_service.mutate_ad_groups(
+                    customer_id=customer_id,
+                    operations=[ad_group_operation],
+                )
+                
+                logger.info(
+                    f"Set tracking template on ad group",
+                    customer_id=customer_id,
+                    ad_group_id=ad_group_id,
+                    tracking_url_template=tracking_url_template
+                )
+                
+                return {
+                    "success": True,
+                    "level": "ad_group",
+                    "ad_group_id": ad_group_id,
+                    "tracking_url_template": tracking_url_template,
+                    "resource_name": response.results[0].resource_name,
+                    "message": f"Tracking template set on ad group {ad_group_id}"
+                }
+                
+            elif level == "ad":
+                if not ad_group_id or not ad_id:
+                    return {
+                        "success": False,
+                        "error": "Both ad_group_id and ad_id are required for ad-level tracking template"
+                    }
+                
+                ad_service = client.get_service("AdService")
+                ad_operation = client.get_type("AdOperation")
+                ad = ad_operation.update
+                ad.resource_name = f"customers/{customer_id}/ads/{ad_id}"
+                ad.tracking_url_template = tracking_url_template
+                
+                ad_operation.update_mask.CopyFrom(
+                    FieldMask(paths=["tracking_url_template"])
+                )
+                
+                response = ad_service.mutate_ads(
+                    customer_id=customer_id,
+                    operations=[ad_operation],
+                )
+                
+                logger.info(
+                    f"Set tracking template on ad",
+                    customer_id=customer_id,
+                    ad_id=ad_id,
+                    tracking_url_template=tracking_url_template
+                )
+                
+                return {
+                    "success": True,
+                    "level": "ad",
+                    "ad_id": ad_id,
+                    "ad_group_id": ad_group_id,
+                    "tracking_url_template": tracking_url_template,
+                    "resource_name": response.results[0].resource_name,
+                    "message": f"Tracking template set on ad {ad_id}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Invalid level '{level}'. Must be 'campaign', 'ad_group', or 'ad'"
+                }
+                
+        except GoogleAdsException as e:
+            logger.error(f"Failed to set tracking template: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": "GoogleAdsException"
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error setting tracking template: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": "UnexpectedError"
+            }
