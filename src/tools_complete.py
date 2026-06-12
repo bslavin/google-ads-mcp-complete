@@ -613,6 +613,32 @@ class GoogleAdsTools:
     def _register_reporting_tools(self) -> Dict[str, Dict[str, Any]]:
         """Register reporting and analytics tools."""
         return {
+            "search": {
+                "description": "Execute a raw GAQL (Google Ads Query Language) query against any resource. "
+                    "This is the most flexible querying tool — write any valid GAQL SELECT statement. "
+                    "Use get_resource_metadata first to discover available fields for a resource. "
+                    "Hints: customer_id should be digits without hyphens. Dates use YYYY-MM-DD format with dashes. "
+                    "Date ranges must be finite with start and end. Requests to change_event must LIMIT <= 10000. "
+                    "Use full field names (e.g. 'campaign.id' not 'id'). "
+                    "GAQL grammar: https://developers.google.com/google-ads/api/docs/query/grammar "
+                    "All resources: https://developers.google.com/google-ads/api/fields/latest/overview",
+                "handler": self.reporting_tools.search,
+                "parameters": {
+                    "customer_id": {"type": "string", "required": True, "description": "Google Ads customer ID (digits only, no hyphens)"},
+                    "query": {"type": "string", "required": True, "description": "Raw GAQL query string, e.g. 'SELECT campaign.id, campaign.name FROM campaign LIMIT 10'"},
+                },
+            },
+            "get_resource_metadata": {
+                "description": "Discover available fields, metrics, and segments for any Google Ads resource. "
+                    "Returns selectable, filterable, and sortable fields including compatible metrics and segments. "
+                    "Use this BEFORE constructing search queries to discover correct field names. "
+                    "Example resource names: campaign, ad_group, ad_group_ad, keyword_view, search_term_view, "
+                    "ad_group_criterion, customer, conversion_action, campaign_budget, asset, asset_group.",
+                "handler": self.reporting_tools.get_resource_metadata,
+                "parameters": {
+                    "resource_name": {"type": "string", "required": True, "description": "Google Ads resource name (e.g. 'campaign', 'ad_group', 'keyword_view')"},
+                },
+            },
             "get_campaign_performance": {
                 "description": "Get campaign performance metrics",
                 "handler": self.reporting_tools.get_campaign_performance,
@@ -641,14 +667,6 @@ class GoogleAdsTools:
                     "date_range": {"type": "string", "default": "LAST_30_DAYS"},
                 },
             },
-            # "run_gaql_query": {
-            #     "description": "Run custom GAQL queries",
-            #     "handler": self.reporting_tools.run_gaql_query,
-            #     "parameters": {
-            #         "customer_id": {"type": "string", "required": True},
-            #         "query": {"type": "string", "required": True},
-            #     },
-            # },
             "get_search_terms_report": {
                 "description": "Get search terms report",
                 "handler": self.reporting_tools.get_search_terms_report,

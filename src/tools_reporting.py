@@ -1,15 +1,55 @@
 """Reporting and analytics tools for Google Ads API v20."""
 
+import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, date, timedelta
 import structlog
+import proto
 
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
+from google.ads.googleads.util import get_nested_attr
 
 from .utils import micros_to_currency, format_date_range
 
 logger = structlog.get_logger(__name__)
+
+# Valid GAQL resources for validation
+GAQL_RESOURCES = set()
+
+def _load_gaql_resources():
+    """Load valid GAQL resource names from bundled file."""
+    global GAQL_RESOURCES
+    resources_path = os.path.join(os.path.dirname(__file__), '..', 'gaql_resources.txt')
+    try:
+        with open(resources_path, 'r') as f:
+            GAQL_RESOURCES = {line.strip() for line in f if line.strip()}
+        logger.info(f"Loaded {len(GAQL_RESOURCES)} GAQL resource names")
+    except FileNotFoundError:
+        logger.warning(f"gaql_resources.txt not found at {resources_path}")
+        GAQL_RESOURCES = set()
+
+_load_gaql_resources()
+
+
+def _format_output_value(value: Any) -> Any:
+    """Format a protobuf value for JSON output."""
+    if isinstance(value, proto.Enum):
+        return value.name
+    elif isinstance(value, proto.Message):
+        return proto.Message.to_dict(value)
+    elif hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
+        return [_format_output_value(v) for v in value]
+    else:
+        return value
+
+
+def _format_output_row(row: proto.Message, attributes) -> Dict[str, Any]:
+    """Format a search result row using field_mask paths."""
+    return {
+        attr: _format_output_value(get_nested_attr(row, attr))
+        for attr in attributes
+    }
 
 
 class ReportingTools:
@@ -366,6 +406,164 @@ class ReportingTools:
                     
         return data
         
+    async def search(self, customer_id: str, query: str) -> Dict[str, Any]:
+        """Execute a raw GAQL (Google Ads Query Language) query.
+        
+        This is the most flexible reporting tool — you can query any resource,
+        select any fields/metrics/segments, apply conditions, orderings, and limits.
+        
+        Args:
+            customer_id: Google Ads customer ID (digits only, no hyphens)
+            query: Raw GAQL query string
+            
+        Returns:
+            Dict with query results as a list of row dicts.
+        """
+        try:
+            client = self.auth_manager.get_client(customer_id)
+            ga_service = client.get_service("GoogleAdsService")
+            
+            # Clean up the query
+            query = query.strip()
+            if query.endswith(";"):
+                query = query[:-1]
+                
+            logger.info("Executing GAQL search", customer_id=customer_id, query=query)
+            
+            stream = ga_service.search_stream(
+                customer_id=customer_id.replace("-", ""),
+                query=query,
+            )
+            
+            rows = []
+            for batch in stream:
+                for row in batch.results:
+                    rows.append(_format_output_row(row, batch.field_mask.paths))
+                    
+            return {
+                "success": True,
+                "query": query,
+                "rows": rows,
+                "row_count": len(rows),
+            }
+            
+        except GoogleAdsException as e:
+            error_msgs = [
+                f"Google Ads API Error: {error.message}"
+                for error in e.failure.errors
+            ]
+            logger.error("GAQL search failed", errors=error_msgs, request_id=e.request_id)
+            return {
+                "success": False,
+                "error": f"Request ID: {e.request_id}\n" + "\n".join(error_msgs),
+                "query": query,
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error in GAQL search: {e}")
+            raise
+
+    async def get_resource_metadata(
+        self,
+        resource_name: str,
+    ) -> Dict[str, Any]:
+        """Get metadata about a Google Ads resource: selectable/filterable/sortable fields,
+        compatible metrics and segments.
+        
+        Use this to discover which fields you can SELECT, WHERE filter, or ORDER BY
+        when querying a resource (e.g. 'campaign', 'ad_group', 'keyword_view').
+        
+        Args:
+            resource_name: The Google Ads resource name (e.g. 'campaign', 'ad_group')
+            
+        Returns:
+            Dict with selectable, filterable, and sortable field lists.
+        """
+        try:
+            # Use default/login client for metadata (not customer-specific)
+            client = self.auth_manager.get_client()
+            field_service = client.get_service("GoogleAdsFieldService")
+            request = client.get_type("SearchGoogleAdsFieldsRequest")
+            
+            selectable = set()
+            filterable = set()
+            sortable = set()
+            
+            # Query 1: Get resource attributes
+            attributes_query = (
+                f"SELECT name, selectable, filterable, sortable "
+                f"WHERE name LIKE '{resource_name}.%' AND category = 'ATTRIBUTE'"
+            )
+            request.query = attributes_query
+            try:
+                response = field_service.search_google_ads_fields(request=request)
+                for field in response:
+                    if field.selectable:
+                        selectable.add(field.name)
+                    if field.filterable:
+                        filterable.add(field.name)
+                    if field.sortable:
+                        sortable.add(field.name)
+            except Exception as e:
+                logger.warning(f"Attributes query failed, trying fallback: {e}")
+                fallback_query = (
+                    f"SELECT name, selectable, filterable, sortable "
+                    f"WHERE name LIKE '{resource_name}.%'"
+                )
+                request.query = fallback_query
+                response = field_service.search_google_ads_fields(request=request)
+                for field in response:
+                    if field.name.startswith(f"{resource_name}."):
+                        if field.selectable:
+                            selectable.add(field.name)
+                        if field.filterable:
+                            filterable.add(field.name)
+                        if field.sortable:
+                            sortable.add(field.name)
+            
+            # Query 2: Get compatible metrics and segments
+            metrics_query = (
+                f"SELECT name, selectable, filterable, sortable "
+                f"WHERE selectable_with CONTAINS ANY('{resource_name}')"
+            )
+            request.query = metrics_query
+            try:
+                response = field_service.search_google_ads_fields(request=request)
+                for field in response:
+                    if field.selectable:
+                        selectable.add(field.name)
+                    if field.filterable:
+                        filterable.add(field.name)
+                    if field.sortable:
+                        sortable.add(field.name)
+            except Exception as e:
+                logger.warning(f"Metrics/segments query failed: {e}")
+            
+            return {
+                "success": True,
+                "resource": resource_name,
+                "selectable": sorted(list(selectable)),
+                "filterable": sorted(list(filterable)),
+                "sortable": sorted(list(sortable)),
+                "selectable_count": len(selectable),
+                "filterable_count": len(filterable),
+                "sortable_count": len(sortable),
+            }
+            
+        except GoogleAdsException as e:
+            error_msgs = [
+                f"Google Ads API Error: {error.message}"
+                for error in e.failure.errors
+            ]
+            logger.error("get_resource_metadata failed", errors=error_msgs)
+            return {
+                "success": False,
+                "error": "\n".join(error_msgs),
+                "resource": resource_name,
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error in get_resource_metadata: {e}")
+            raise
+
     async def get_search_terms_report(
         self,
         customer_id: str,
